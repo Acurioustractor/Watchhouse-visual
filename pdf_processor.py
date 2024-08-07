@@ -121,17 +121,25 @@ def update_watchhouse_csv(data, csv_file):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writerow(data)
 
+def display_csv_contents(csv_path):
+    df = pd.read_csv(csv_path)
+    print("\nCSV Contents:")
+    print(df.to_string(index=False))
+    print(f"\nTotal rows: {len(df)}")
+
 def create_visualization(csv_path, image_path):
     print(f"Creating visualization")
     df = pd.read_csv(csv_path)
     
+    if len(df) == 0:
+        print("No data available for visualization.")
+        return
+    
     # Clean up the date column
     def clean_date(date_str):
         try:
-            # Try to parse the date string
             return pd.to_datetime(date_str, format='%Y-%m-%d').strftime('%Y-%m-%d')
         except ValueError:
-            # If parsing fails, try to extract a valid date
             match = re.search(r'(\d{4}-\d{2}-\d{2})', str(date_str))
             if match:
                 return match.group(1)
@@ -140,6 +148,10 @@ def create_visualization(csv_path, image_path):
 
     df['Date'] = df['Date'].apply(clean_date)
     df = df.dropna(subset=['Date'])  # Remove rows with invalid dates
+
+    if len(df) == 0:
+        print("No valid dates available for visualization.")
+        return
 
     try:
         df['Date'] = pd.to_datetime(df['Date'], format='%Y-%m-%d')
@@ -168,8 +180,13 @@ def create_visualization(csv_path, image_path):
     plt.tight_layout()
     plt.savefig(image_path)
     print(f"Visualization saved to {image_path}")
+    
+    # Display some basic statistics
+    print("\nBasic Statistics:")
+    print(df[numeric_columns].describe())
 
-def daily_task():
+def main():
+    print("PDF Processor is running!")
     pdf_url = "https://open-crime-data.s3.ap-southeast-2.amazonaws.com/Crime%20Statistics/Persons%20Currently%20In%20Watchhouse%20Custody.pdf"
     pdf_path = "watchhouse_data.pdf"
     csv_path = "watchhouse_data.csv"
@@ -177,17 +194,14 @@ def daily_task():
 
     download_pdf(pdf_url, pdf_path)
     pdf_to_csv(pdf_path, csv_path)
+    display_csv_contents(csv_path)
     create_visualization(csv_path, visualization_path)
     print(f"Daily task completed for {datetime.now().strftime('%Y-%m-%d')}")
 
-def main():
-    print("PDF Processor is running!")
-    daily_task()  # Run once immediately
-    # Uncomment the following lines to schedule daily runs
-    # schedule.every().day.at("00:00").do(daily_task)
-    # while True:
-    #     schedule.run_pending()
-    #     time.sleep(1)
+    print("\nTo view the trend:")
+    print(f"1. Check the CSV file: {csv_path}")
+    print(f"2. Open the PNG file: {visualization_path}")
+    print("3. If the PNG is empty, you may need to run the script multiple times to gather more data points.")
 
 if __name__ == "__main__":
     main()
