@@ -8,6 +8,7 @@ import time
 import os
 import csv
 import re
+import traceback
 
 def download_pdf(url, save_path):
     print(f"Downloading PDF from {url}")
@@ -29,46 +30,66 @@ def pdf_to_csv(pdf_path, csv_path):
     
     try:
         # Extract detailed data
-        queensland_row = df[df['Unnamed: 0'] == 'QUEENSLAND']
-        print("\nQueensland row:")
-        print(queensland_row)
+        queensland_rows = df[df['Unnamed: 0'] == 'QUEENSLAND']
+        print("\nQueensland rows:")
+        print(queensland_rows)
         
-        if queensland_row.empty:
-            raise ValueError("Queensland row not found in the data")
+        if queensland_rows.empty:
+            raise ValueError("Queensland rows not found in the data")
         
-        # Split combined First Nations Status data
-        first_nations_status = queensland_row['First Nations Status'].iloc[0].split()
-        first_nations = int(first_nations_status[0])
-        non_indigenous = int(first_nations_status[1])
-
-        # Split combined In Custody (Days) data
-        in_custody_days = queensland_row['In Custody (Days)'].iloc[0].split()
-        
-        # Use the correct year format
-        current_date = datetime.now().strftime('%Y-%m-%d')
-        
+        # Initialize data dictionary
         data = {
-            'Date': current_date,
-            'Total Adults': int(queensland_row['Total in'].iloc[0]),
-            'Total Children': int(queensland_row['Total in'].iloc[1]) if len(queensland_row) > 1 else 0,
-            'Total in Custody': int(queensland_row['Total in'].iloc[0]) + (int(queensland_row['Total in'].iloc[1]) if len(queensland_row) > 1 else 0),
-            'Adults Male': int(queensland_row['Unnamed: 1'].iloc[0]),
-            'Adults Female': int(queensland_row['Gender'].iloc[0]),
-            'Children Male': int(queensland_row['Unnamed: 1'].iloc[1]) if len(queensland_row) > 1 else 0,
-            'Children Female': int(queensland_row['Gender'].iloc[1]) if len(queensland_row) > 1 else 0,
-            'Adults First Nations': first_nations,
-            'Adults Non-Indigenous': non_indigenous,
-            'Children First Nations': int(queensland_row['First Nations Status'].iloc[1].split()[0]) if len(queensland_row) > 1 else 0,
-            'Children Non-Indigenous': int(queensland_row['First Nations Status'].iloc[1].split()[1]) if len(queensland_row) > 1 else 0,
-            'Adults 0-2 Days': int(in_custody_days[0]),
-            'Adults 3-7 Days': int(in_custody_days[1]),
-            'Adults Over 7 Days': int(in_custody_days[2]),
-            'Children 0-2 Days': int(queensland_row['In Custody (Days)'].iloc[1].split()[0]) if len(queensland_row) > 1 else 0,
-            'Children 3-7 Days': int(queensland_row['In Custody (Days)'].iloc[1].split()[1]) if len(queensland_row) > 1 else 0,
-            'Children Over 7 Days': int(queensland_row['In Custody (Days)'].iloc[1].split()[2]) if len(queensland_row) > 1 else 0,
-            'Longest Adult Stay': int(queensland_row['Longest Days'].iloc[0]),
-            'Longest Child Stay': int(queensland_row['Longest Days'].iloc[1]) if len(queensland_row) > 1 else 0
+            'Date': datetime.now().strftime('%Y-%m-%d'),
+            'Total Adults': 0,
+            'Total Children': 0,
+            'Total in Custody': 0,
+            'Adults Male': 0,
+            'Adults Female': 0,
+            'Children Male': 0,
+            'Children Female': 0,
+            'Adults First Nations': 0,
+            'Adults Non-Indigenous': 0,
+            'Children First Nations': 0,
+            'Children Non-Indigenous': 0,
+            'Adults 0-2 Days': 0,
+            'Adults 3-7 Days': 0,
+            'Adults Over 7 Days': 0,
+            'Children 0-2 Days': 0,
+            'Children 3-7 Days': 0,
+            'Children Over 7 Days': 0,
+            'Longest Adult Stay': 0,
+            'Longest Child Stay': 0
         }
+        
+        # Process each Queensland row
+        for _, row in queensland_rows.iterrows():
+            age_group = row['Age']
+            if age_group == 'Adult':
+                data['Total Adults'] = int(row['Total in'])
+                data['Adults Male'] = int(row['Unnamed: 1'])
+                data['Adults Female'] = int(row['Gender'])
+                first_nations_status = row['First Nations Status'].split()
+                data['Adults First Nations'] = int(first_nations_status[0])
+                data['Adults Non-Indigenous'] = int(first_nations_status[1])
+                in_custody_days = row['In Custody (Days)'].split()
+                data['Adults 0-2 Days'] = int(in_custody_days[0])
+                data['Adults 3-7 Days'] = int(in_custody_days[1])
+                data['Adults Over 7 Days'] = int(in_custody_days[2])
+                data['Longest Adult Stay'] = int(row['Longest Days'])
+            elif age_group == 'Child':
+                data['Total Children'] = int(row['Total in'])
+                data['Children Male'] = int(row['Unnamed: 1'])
+                data['Children Female'] = int(row['Gender'])
+                first_nations_status = row['First Nations Status'].split()
+                data['Children First Nations'] = int(first_nations_status[0])
+                data['Children Non-Indigenous'] = int(first_nations_status[1])
+                in_custody_days = row['In Custody (Days)'].split()
+                data['Children 0-2 Days'] = int(in_custody_days[0])
+                data['Children 3-7 Days'] = int(in_custody_days[1])
+                data['Children Over 7 Days'] = int(in_custody_days[2])
+                data['Longest Child Stay'] = int(row['Longest Days'])
+        
+        data['Total in Custody'] = data['Total Adults'] + data['Total Children']
         
         update_watchhouse_csv(data, csv_path)
         print(f"Detailed CSV saved to {csv_path}")
@@ -76,6 +97,7 @@ def pdf_to_csv(pdf_path, csv_path):
     except Exception as e:
         print(f"Error processing PDF data: {e}")
         print("Unable to extract required information. Please check the PDF structure.")
+        print(f"Traceback: {traceback.format_exc()}")
 
 def update_watchhouse_csv(data, csv_file):
     fieldnames = [
@@ -87,9 +109,6 @@ def update_watchhouse_csv(data, csv_file):
         'Children 0-2 Days', 'Children 3-7 Days', 'Children Over 7 Days',
         'Longest Adult Stay', 'Longest Child Stay'
     ]
-    
-    # Ensure the date is in the correct format
-    data['Date'] = datetime.strptime(data['Date'], '%Y-%m-%d').strftime('%Y-%m-%d')
     
     # Check if file exists, if not, create it with headers
     if not os.path.exists(csv_file):
