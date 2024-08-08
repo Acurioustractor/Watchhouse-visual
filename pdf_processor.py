@@ -1,108 +1,89 @@
-import requests
-import pandas as pd
 import tabula
+import pandas as pd
+import requests
 from io import BytesIO
 
 def download_pdf(url):
     print(f"Downloading PDF from {url}")
     response = requests.get(url)
-    response.raise_for_status()
     return BytesIO(response.content)
+
+def safe_split(value, index, default=''):
+    parts = str(value).split()
+    return parts[index] if len(parts) > index else default
+
+def process_watchhouse_data(df):
+    processed_data = []
+    current_watchhouse = None
+    for _, row in df.iterrows():
+        try:
+            if pd.notna(row['Unnamed: 0']) and row['Unnamed: 0'] != 'All Watch-houses':
+                current_watchhouse = row['Unnamed: 0']
+                age_group = row['Age']
+            elif current_watchhouse and pd.notna(row['Age']):
+                age_group = row['Age']
+            else:
+                continue
+
+            processed_data.append({
+                'Watch-house': current_watchhouse,
+                'Age Group': age_group,
+                'Total': row['Total in'],
+                'Male': row['Unnamed: 1'],
+                'Female': row['Gender'],
+                'First Nations': safe_split(row['First Nations Status'], 0),
+                'Non Indigenous': safe_split(row['First Nations Status'], 1),
+                '0-2 Days': safe_split(row['In Custody (Days)'], 0),
+                '3-7 Days': safe_split(row['In Custody (Days)'], 1),
+                'Over 7 Days': safe_split(row['In Custody (Days)'], 2),
+                'Longest Stay': row['Longest Days']
+            })
+        except Exception as e:
+            print(f"Error processing row: {row}")
+            print(f"Error message: {str(e)}")
+    return pd.DataFrame(processed_data)
 
 def extract_watchhouse_data(pdf_content):
     print("Extracting data from PDF")
-    # Read all pages of the PDF
-    tables = tabula.read_pdf(pdf_content, pages='all', multiple_tables=True)
+    dfs = tabula.read_pdf(pdf_content, pages='all', multiple_tables=True)
     
-    print(f"Number of tables extracted: {len(tables)}")
+    print(f"Number of tables extracted: {len(dfs)}")
+    for i, df in enumerate(dfs):
+        print(f"\nTable {i+1} shape: {df.shape}")
+        print(f"Table {i+1} columns: {df.columns.tolist()}")
+        print(f"First few rows of Table {i+1}:")
+        print(df.head().to_string())
     
-    # Combine all tables into one DataFrame
-    df = pd.concat(tables, ignore_index=True)
+    combined_df = pd.concat(dfs, ignore_index=True)
     
-    print("Combined DataFrame structure:")
-    print(df.info())
+    processed_df = process_watchhouse_data(combined_df)
     
-    print("\nFirst few rows of the combined DataFrame:")
-    print(df.head().to_string())
-    
-    # Clean up column names
-    df.columns = df.columns.str.strip()
-    
-    # Filter rows for individual watchhouses and the Queensland total
-    df = df[df['Unnamed: 0'].notna() & (df['Unnamed: 0'] != 'All Watchhouses')]
-    
-    # Rename columns for clarity
-    df = df.rename(columns={
-        'Unnamed: 0': 'Location',
-        'Age': 'Age Group',
-        'Total in': 'Total in Custody',
-        'Unnamed: 1': 'Male',
-        'Gender': 'Female',
-        'Unnamed: 2': 'Other Gender',
-        'First Nations Status': 'First Nations',
-        'Unnamed: 3': 'Other Status',
-        'In Custody (Days)': 'Custody Days',
-        'Longest Days': 'Longest Stay'
-    })
-    
-    # Split the 'First Nations' column into two
-    if 'First Nations' in df.columns:
-        df[['First Nations', 'Non Indigenous']] = df['First Nations'].str.split(expand=True)
-    else:
-        print("Warning: 'First Nations' column not found")
-    
-    # Split the 'Custody Days' column
-    if 'Custody Days' in df.columns:
-        custody_days = df['Custody Days'].str.split(expand=True)
-        if custody_days.shape[1] == 3:
-            df[['0-2 Days', '3-7 Days', 'Over 7 Days']] = custody_days
-        else:
-            print(f"Warning: 'Custody Days' column has {custody_days.shape[1]} parts instead of the expected 3")
-            print(custody_days.head())
-    else:
-        print("Warning: 'Custody Days' column not found")
-    
-    # Convert numeric columns to integers
-    numeric_columns = ['Total in Custody', 'Male', 'Female', 'Other Gender', 'First Nations', 'Non Indigenous', 
-                       'Other Status', '0-2 Days', '3-7 Days', 'Over 7 Days', 'Longest Stay']
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-        else:
-            print(f"Warning: Column '{col}' not found")
-    
-    return df
+    return processed_df
 
-# URL of the PDF
-pdf_url = "https://open-crime-data.s3.ap-southeast-2.amazonaws.com/Crime%20Statistics/Persons%20Currently%20In%20Watchhouse%20Custody.pdf"
-
-try:
-    # Download and process the PDF
+def main():
+    pdf_url = "https://open-crime-data.s3.ap-southeast-2.amazonaws.com/Crime%20Statistics/Persons%20Currently%20In%20Watchhouse%20Custody.pdf"
     pdf_content = download_pdf(pdf_url)
-    df = extract_watchhouse_data(pdf_content)
-
-    # Display summary of the data
-    print(f"\nTotal number of entries: {len(df)}")
-    print("\nColumns in the dataset:")
-    print(df.columns.tolist())
-
-    print("\nFirst few rows of data:")
-    print(df.head().to_string())
-
-    if 'QUEENSLAND' in df['Location'].values:
-        print("\nQueensland total:")
-        print(df[df['Location'] == 'QUEENSLAND'].to_string(index=False))
-    else:
-        print("\nWarning: Queensland total not found in the data")
-
-    print("\nSummary statistics for numeric columns:")
-    print(df.describe())
-
-    # Save to CSV
+    
+    watchhouse_data = extract_watchhouse_data(pdf_content)
+    
     csv_filename = 'watchhouse_data.csv'
-    df.to_csv(csv_filename, index=False)
-    print(f"\nCSV file '{csv_filename}' has been created.")
+    watchhouse_data.to_csv(csv_filename, index=False)
+    print(f"Data saved to {csv_filename}")
+    
+    print("\nSummary of Watch-house Data:")
+    print(watchhouse_data.groupby('Age Group').agg({
+        'Total': 'sum',
+        'Male': 'sum',
+        'Female': 'sum',
+        'First Nations': 'sum',
+        'Non Indigenous': 'sum'
+    }))
+    
+    print("\nFirst few rows of data:")
+    print(watchhouse_data.head().to_string())
 
-except Exception as e:
-    print(f"An error occurred: {str(e)}")
-    print("Please check the PDF structure and update the script accordingly.")
+    print("\nFull Dataset:")
+    print(watchhouse_data.to_string())
+
+if __name__ == "__main__":
+    main()
